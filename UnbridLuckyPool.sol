@@ -430,7 +430,6 @@ contract UnbridLuckyPool {
         Pool storage pool = pools[_poolId];
         require(pool.winner != address(0), "Winner not selected");
 
-        
         uint256 randomSeed = uint256(
             keccak256(
                 abi.encodePacked(
@@ -441,7 +440,6 @@ contract UnbridLuckyPool {
             )
         );
 
-        
         address[] memory allEntries = new address[](
             pool.totalCollected / pool.entryPrice
         );
@@ -457,11 +455,178 @@ contract UnbridLuckyPool {
             }
         }
 
-        
         uint256 randomIndex = randomSeed % allEntries.length;
         address expectedWinner = allEntries[randomIndex];
 
         require(expectedWinner == pool.winner, "Winner does not match");
         return expectedWinner;
+    }
+
+    function placeBetWithTokenMultiple(
+        uint256[] calldata _poolIds,
+        address user,
+        uint256[] calldata _amounts
+    ) external onlyOwner nonReentrant {
+        require(
+            _poolIds.length == _amounts.length,
+            "Arrays must have the same length"
+        );
+        require(_poolIds.length > 0, "Must bet on at least one pool");
+
+        for (uint256 i = 0; i < _poolIds.length; i++) {
+            uint256 poolId = _poolIds[i];
+            uint256 amount = _amounts[i];
+
+            require(poolId < poolCounter, "Pool does not exist");
+            require(pools[poolId].isOpen, "Pool is not open");
+
+            Pool storage pool = pools[poolId];
+            require(
+                pool.tokenAddress != address(0),
+                "This pool accepts only ETH"
+            );
+
+            IERC20 token = IERC20(pool.tokenAddress);
+
+            require(
+                amount == pool.entryPrice,
+                "Amount must match pool entry price"
+            );
+
+            require(
+                token.allowance(user, address(this)) >= amount,
+                "Insufficient token allowance"
+            );
+
+            token.safeTransferFrom(user, address(this), amount);
+
+            _recordBet(poolId, user, amount);
+        }
+    }
+
+    function placeBetMultiple(uint256[] calldata _poolIds, address user)
+        external
+        payable
+        onlyOwner
+        nonReentrant
+    {
+        require(_poolIds.length > 0, "Must bet on at least one pool");
+
+        uint256 totalRequired = 0;
+
+        for (uint256 i = 0; i < _poolIds.length; i++) {
+            uint256 poolId = _poolIds[i];
+
+            require(poolId < poolCounter, "Pool does not exist");
+            require(pools[poolId].isOpen, "Pool is not open");
+
+            Pool storage pool = pools[poolId];
+            require(
+                pool.tokenAddress == address(0),
+                "This pool accepts only ERC-20 tokens"
+            );
+
+            totalRequired += pool.entryPrice;
+        }
+
+        require(
+            msg.value == totalRequired,
+            "Sent amount must match total required"
+        );
+
+        for (uint256 i = 0; i < _poolIds.length; i++) {
+            uint256 poolId = _poolIds[i];
+            Pool storage pool = pools[poolId];
+
+            _recordBet(poolId, user, pool.entryPrice);
+        }
+    }
+
+    function placeBetWithTokenMultipleFrom(
+        uint256[] calldata _poolIds,
+        address from,
+        address participant,
+        uint256[] calldata _amounts
+    ) external onlyOwner nonReentrant {
+        require(
+            _poolIds.length == _amounts.length,
+            "Arrays must have the same length"
+        );
+        require(_poolIds.length > 0, "Must bet on at least one pool");
+
+        for (uint256 i = 0; i < _poolIds.length; i++) {
+            uint256 poolId = _poolIds[i];
+            uint256 amount = _amounts[i];
+
+            require(poolId < poolCounter, "Pool does not exist");
+            require(pools[poolId].isOpen, "Pool is not open");
+
+            Pool storage pool = pools[poolId];
+            require(
+                pool.tokenAddress != address(0),
+                "This pool accepts only ETH"
+            );
+
+            IERC20 token = IERC20(pool.tokenAddress);
+
+            require(
+                amount == pool.entryPrice,
+                "Amount must match pool entry price"
+            );
+
+            require(
+                token.allowance(from, address(this)) >= amount,
+                "Insufficient token allowance"
+            );
+
+            token.safeTransferFrom(from, address(this), amount);
+
+            _recordBet(poolId, participant, amount);
+        }
+    }
+
+    function placeBetMultipleFrom(
+        uint256[] calldata _poolIds,
+        address from, // Dirección que envía el ETH
+        address participant // Dirección que participará en la pool
+    ) external payable onlyOwner nonReentrant {
+        require(_poolIds.length > 0, "Must bet on at least one pool");
+
+        uint256 totalRequired = 0;
+
+        // Primera pasada: validaciones y cálculo del total requerido
+        for (uint256 i = 0; i < _poolIds.length; i++) {
+            uint256 poolId = _poolIds[i];
+
+            require(poolId < poolCounter, "Pool does not exist");
+            require(pools[poolId].isOpen, "Pool is not open");
+
+            Pool storage pool = pools[poolId];
+            require(
+                pool.tokenAddress == address(0),
+                "This pool accepts only ERC-20 tokens"
+            );
+
+            totalRequired += pool.entryPrice;
+        }
+
+        require(
+            msg.value == totalRequired,
+            "Sent amount must match total required"
+        );
+
+        // Segunda pasada: registrar las apuestas
+        for (uint256 i = 0; i < _poolIds.length; i++) {
+            uint256 poolId = _poolIds[i];
+            Pool storage pool = pools[poolId];
+
+            _recordBet(poolId, participant, pool.entryPrice);
+        }
+
+        // Si 'from' es diferente al contrato, transferir el ETH recibido
+        if (from != address(this)) {
+            (bool success, ) = from.call{value: msg.value}("");
+            require(success, "ETH transfer failed");
+        }
     }
 }
